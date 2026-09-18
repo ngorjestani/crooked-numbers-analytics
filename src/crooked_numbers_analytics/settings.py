@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 _AZURE_CONTAINER_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
 _AZURE_ACCOUNT_PATTERN = re.compile(r"^[a-z0-9]{3,24}$")
+_DEFAULT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +30,7 @@ class Settings:
             _account_name_from_url(self.azure_storage_account_url)
 
     @classmethod
-    def from_env(cls, env_file: str | Path | None = ".env") -> Settings:
+    def from_env(cls, env_file: str | Path | None = _DEFAULT_ENV_FILE) -> Settings:
         """Load settings from an optional dotenv file and the environment."""
 
         if env_file is not None:
@@ -49,6 +50,15 @@ class Settings:
         if self.azure_storage_account_url is None:
             raise ValueError("AZURE_STORAGE_ACCOUNT_URL is not configured")
         return _account_name_from_url(self.azure_storage_account_url)
+
+
+def get_settings(env_file: str | Path | None = _DEFAULT_ENV_FILE) -> Settings:
+    """Load settings and require the Azure storage configuration."""
+
+    settings = Settings.from_env(env_file)
+    if settings.azure_storage_account_url is None:
+        raise ValueError("AZURE_STORAGE_ACCOUNT_URL is not configured")
+    return settings
 
 
 def _account_name_from_url(account_url: str) -> str:

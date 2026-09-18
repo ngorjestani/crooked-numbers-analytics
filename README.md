@@ -35,18 +35,21 @@ Set `AZURE_STORAGE_ACCOUNT_URL` in `.env` to an HTTPS Blob Storage account URL,
 such as `https://example.blob.core.windows.net`. The default container is
 `baseball-data`. The local `.env` file is ignored by Git.
 
-When an account URL is configured, `open_database()` loads DuckDB's Azure
-extension and creates a temporary credential-chain secret. Authenticate through
-a supported Azure credential source, such as `az login`, environment credentials,
-workload identity, or managed identity. DuckDB can then query datasets directly:
+`open_database()` requires the account URL, loads DuckDB's Azure extension, and
+creates a temporary credential-chain secret. Authenticate through a supported
+Azure credential source, such as `az login`, environment credentials, workload
+identity, or managed identity. DuckDB can then query datasets directly:
 
 ```python
-from crooked_numbers_analytics import Settings, azure_dataset_path, open_database
+from crooked_numbers_analytics.db import open_database
+from crooked_numbers_analytics.paths import azure_dataset_path
 
-settings = Settings.from_env()
-path = azure_dataset_path("raw/statcast/**/*.parquet", settings.azure_storage_container)
+path = azure_dataset_path(
+    "raw/statcast/**/*.parquet",
+    container="baseball-data",
+)
 
-with open_database(settings) as connection:
+with open_database() as connection:
     rows = connection.execute("SELECT count(*) FROM read_parquet(?)", [path]).fetchone()
 ```
 

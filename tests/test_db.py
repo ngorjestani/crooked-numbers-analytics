@@ -1,38 +1,48 @@
+from unittest.mock import MagicMock
+
 import pytest
 
-from crooked_numbers_analytics.db import azure_dataset_path, open_database
+from crooked_numbers_analytics import db
+from crooked_numbers_analytics.settings import Settings
 
 
-@pytest.mark.parametrize(
-    ("relative_path", "expected"),
-    [
-        (
-            "raw/statcast/**/*.parquet",
-            "az://baseball-data/raw/statcast/**/*.parquet",
-        ),
-        (
-            "/curated/pitcher_appearances/**/*.parquet/",
-            "az://baseball-data/curated/pitcher_appearances/**/*.parquet",
-        ),
-    ],
-)
-def test_azure_dataset_path(relative_path: str, expected: str) -> None:
-    assert azure_dataset_path(relative_path) == expected
-
-
-def test_azure_dataset_path_supports_another_container() -> None:
-    assert azure_dataset_path("sample.parquet", "research") == (
-        "az://research/sample.parquet"
+def test_open_database_configures_in_memory_azure_connection(
+    monkeypatch,
+) -> None:
+    connection = MagicMock()
+    connect = MagicMock(return_value=connection)
+    monkeypatch.setattr(db.duckdb, "connect", connect)
+    settings = Settings(
+        azure_storage_account_url="https://crookednumbers.blob.core.windows.net"
     )
 
+    result = db.open_database(settings)
 
-def test_azure_dataset_path_rejects_empty_values() -> None:
-    with pytest.raises(ValueError, match="container"):
-        azure_dataset_path("data.parquet", "")
-    with pytest.raises(ValueError, match="relative_path"):
-        azure_dataset_path("")
+    assert result is connection
+    connect.assert_called_once_with(":memory:")
+    connection.install_extension.assert_called_once_with("azure")
+    connection.load_extension.assert_called_once_with("azure")
+    assert "PROVIDER credential_chain" in connection.execute.call_args.args[0]
+    assert "ACCOUNT_NAME 'crookednumbers'" in connection.execute.call_args.args[0]
 
 
-def test_open_database_is_in_memory() -> None:
-    with open_database() as connection:
-        assert connection.execute("SELECT 1").fetchone() == (1,)
+def test_open_database_loads_settings_when_not_supplied(monkeypatch) -> None:
+    settings = Settings(
+        azure_storage_account_url="https://crookednumbers.blob.core.windows.net"
+    )
+    monkeypatch.setattr(db, "get_settings", MagicMock(return_value=settings))
+    monkeypatch.setattr(db.duckdb, "connect", MagicMock(return_value=MagicMock()))
+
+    db.open_database()
+
+    db.get_settings.assert_called_once_with()
+
+
+def test_open_database_validates_azure_settings_before_connecting(monkeypatch) -> None:
+    connect = MagicMock()
+    monkeypatch.setattr(db.duckdb, "connect", connect)
+
+    with pytest.raises(ValueError, match="AZURE_STORAGE_ACCOUNT_URL is not configured"):
+        db.open_database(Settings(azure_storage_account_url=None))
+
+    connect.assert_not_called()
