@@ -40,6 +40,7 @@ def test_get_settings_loads_dotenv_file(
     env_file.write_text(
         "AZURE_STORAGE_ACCOUNT_URL=https://crookednumbers.blob.core.windows.net\n"
         "AZURE_STORAGE_CONTAINER=research-data\n"
+        "ANALYTICS_DATA_ROOT=./local-data\n"
     )
 
     settings = get_settings(env_file)
@@ -49,6 +50,9 @@ def test_get_settings_loads_dotenv_file(
     )
     assert settings.azure_storage_account_name == "crookednumbers"
     assert settings.azure_storage_container == "research-data"
+    assert settings.analytics_data_root == (
+        settings_module.REPOSITORY_ROOT / "local-data"
+    )
 
 
 def test_environment_variables_take_precedence_over_dotenv(
@@ -76,11 +80,13 @@ def test_settings_uses_defaults_without_environment(
 ) -> None:
     monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_URL", raising=False)
     monkeypatch.delenv("AZURE_STORAGE_CONTAINER", raising=False)
+    monkeypatch.delenv("ANALYTICS_DATA_ROOT", raising=False)
 
     settings = Settings.from_env(env_file=None)
 
     assert settings.azure_storage_account_url is None
     assert settings.azure_storage_container == "baseball-data"
+    assert settings.analytics_data_root == settings_module.REPOSITORY_ROOT / "data"
 
 
 def test_settings_rejects_invalid_account_url() -> None:

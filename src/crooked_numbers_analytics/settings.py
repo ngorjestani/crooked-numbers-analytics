@@ -12,7 +12,9 @@ from dotenv import load_dotenv
 
 _AZURE_CONTAINER_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
 _AZURE_ACCOUNT_PATTERN = re.compile(r"^[a-z0-9]{3,24}$")
-_DEFAULT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_ENV_FILE = REPOSITORY_ROOT / ".env"
+_DEFAULT_DATA_ROOT = REPOSITORY_ROOT / "data"
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +23,7 @@ class Settings:
 
     azure_storage_account_url: str | None
     azure_storage_container: str = "baseball-data"
+    analytics_data_root: Path = _DEFAULT_DATA_ROOT
 
     def __post_init__(self) -> None:
         if not _AZURE_CONTAINER_PATTERN.fullmatch(self.azure_storage_container):
@@ -38,9 +41,11 @@ class Settings:
 
         account_url = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "").strip() or None
         container = os.getenv("AZURE_STORAGE_CONTAINER", "baseball-data").strip()
+        data_root = _resolve_data_root(os.getenv("ANALYTICS_DATA_ROOT", "./data"))
         return cls(
             azure_storage_account_url=account_url,
             azure_storage_container=container,
+            analytics_data_root=data_root,
         )
 
     @property
@@ -70,3 +75,10 @@ def _account_name_from_url(account_url: str) -> str:
     if not _AZURE_ACCOUNT_PATTERN.fullmatch(account_name):
         raise ValueError("AZURE_STORAGE_ACCOUNT_URL has an invalid account name")
     return account_name
+
+
+def _resolve_data_root(data_root: str | Path) -> Path:
+    path = Path(data_root).expanduser()
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
+    return path.resolve()

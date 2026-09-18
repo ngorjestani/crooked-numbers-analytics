@@ -1,6 +1,9 @@
 # Local configuration
 .env
 
+# Disposable local research data
+data/
+
 # Virtual environments
 .venv/
 venv/
