@@ -27,7 +27,8 @@ def create_pitcher_appearances_view(
 
     ``pitch_count`` counts Statcast pitch records. It should be validated against
     official pitch counts before perfect equivalence is assumed in every edge
-    case.
+    case. ``innings_appeared`` and ``ups`` both count distinct innings containing
+    a Statcast record; they do not infer unrecorded warmup activity.
     """
 
     if not _VIEW_NAME_PATTERN.fullmatch(view_name):
@@ -91,6 +92,8 @@ def create_pitcher_appearances_view(
                 count(*) AS pitch_count,
                 min(inning) AS first_inning,
                 max(inning) AS last_inning,
+                count(DISTINCT inning) AS innings_appeared,
+                count(DISTINCT inning) AS ups,
                 min(game_pitch_order) AS first_pitch_order
             FROM ordered_pitches
             GROUP BY game_pk, pitching_team, pitcher_id
@@ -114,7 +117,9 @@ def create_pitcher_appearances_view(
             is_start,
             pitch_count,
             first_inning,
-            last_inning
+            last_inning,
+            innings_appeared,
+            ups
         FROM classified_appearances
         """
     )

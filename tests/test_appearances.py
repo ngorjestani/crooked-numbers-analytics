@@ -55,7 +55,7 @@ def statcast_connection(
             ),
             (
                 1, "2024-06-01", 2024, "R", "MIL", "CHC",
-                2, "Top", 5, 3, 103, "Reliever, Late",
+                4, "Top", 5, 3, 103, "Reliever, Late",
             ),
             # Home batters: the away team pitches.
             (
@@ -98,7 +98,9 @@ def test_builds_starter_and_reliever_appearances(
 
     rows = statcast_connection.sql(
         """
-        SELECT pitcher_id, is_start, pitch_count, first_inning, last_inning
+        SELECT
+            pitcher_id, is_start, pitch_count, first_inning, last_inning,
+            innings_appeared, ups
         FROM pitcher_appearances
         WHERE game_pk = 1 AND pitching_team = 'MIL'
         ORDER BY pitcher_id
@@ -106,9 +108,9 @@ def test_builds_starter_and_reliever_appearances(
     ).fetchall()
 
     assert rows == [
-        (101, True, 2, 1, 1),
-        (102, False, 1, 1, 1),
-        (103, False, 3, 2, 2),
+        (101, True, 2, 1, 1, 1, 1),
+        (102, False, 1, 1, 1, 1, 1),
+        (103, False, 3, 2, 4, 2, 2),
     ]
 
 
