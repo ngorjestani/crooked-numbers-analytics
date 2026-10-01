@@ -23,28 +23,201 @@ def workload_connection() -> duckdb.DuckDBPyConnection:
             first_inning BIGINT,
             last_inning BIGINT,
             innings_appeared BIGINT,
-            ups BIGINT
+            ups BIGINT,
+            outs_recorded BIGINT,
+            innings_pitched DOUBLE
         )
         """
     )
     con.executemany(
         """
         INSERT INTO pitcher_appearances
-        VALUES (?, ?, 2024, ?, ?, ?, ?, ?, 7, 6 + ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 7, 6 + ?, ?, ?, ?, ?)
         """,
         [
-            (101, "2024-06-08", "MIL", 10, "Workload, Pitcher", False, 15, 1, 1, 1),
-            (102, "2024-06-09", "MIL", 10, "Workload, Pitcher", False, 20, 2, 2, 2),
+            (
+                101,
+                "2024-06-08",
+                2024,
+                "MIL",
+                10,
+                "Workload, Pitcher",
+                False,
+                15,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                102,
+                "2024-06-09",
+                2024,
+                "MIL",
+                10,
+                "Workload, Pitcher",
+                False,
+                20,
+                2,
+                2,
+                2,
+                4,
+                4 / 3,
+            ),
             # The June 10 team change must not reset pitcher 10's workload.
-            (103, "2024-06-10", "CHC", 10, "Workload, Pitcher", True, 10, 1, 1, 1),
-            (201, "2024-06-08", "MIL", 20, "Rested, Pitcher", False, 12, 1, 1, 1),
-            (202, "2024-06-10", "MIL", 20, "Rested, Pitcher", False, 9, 1, 1, 1),
-            (203, "2024-06-15", "MIL", 20, "Rested, Pitcher", False, 8, 1, 1, 1),
+            (
+                103,
+                "2024-06-10",
+                2024,
+                "CHC",
+                10,
+                "Workload, Pitcher",
+                True,
+                10,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                104,
+                "2024-06-11",
+                2024,
+                "CHC",
+                10,
+                "Workload, Pitcher",
+                False,
+                12,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            # A new season resets cumulative, but not identity, partitions.
+            (
+                105,
+                "2025-04-01",
+                2025,
+                "CHC",
+                10,
+                "Workload, Pitcher",
+                False,
+                8,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                201,
+                "2024-06-08",
+                2024,
+                "MIL",
+                20,
+                "Rested, Pitcher",
+                False,
+                12,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                202,
+                "2024-06-10",
+                2024,
+                "MIL",
+                20,
+                "Rested, Pitcher",
+                False,
+                9,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                203,
+                "2024-06-15",
+                2024,
+                "MIL",
+                20,
+                "Rested, Pitcher",
+                False,
+                8,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
             # Two June 9 games exercise calendar-day aggregation.
-            (301, "2024-06-08", "MIL", 30, "Doubleheader, Pitcher", False, 5, 1, 1, 1),
-            (302, "2024-06-09", "MIL", 30, "Doubleheader, Pitcher", False, 7, 1, 1, 1),
-            (303, "2024-06-09", "MIL", 30, "Doubleheader, Pitcher", False, 8, 1, 1, 1),
-            (304, "2024-06-10", "MIL", 30, "Doubleheader, Pitcher", False, 6, 1, 1, 1),
+            (
+                301,
+                "2024-06-08",
+                2024,
+                "MIL",
+                30,
+                "Doubleheader, Pitcher",
+                False,
+                5,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                302,
+                "2024-06-09",
+                2024,
+                "MIL",
+                30,
+                "Doubleheader, Pitcher",
+                False,
+                7,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                303,
+                "2024-06-09",
+                2024,
+                "MIL",
+                30,
+                "Doubleheader, Pitcher",
+                False,
+                8,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
+            (
+                304,
+                "2024-06-10",
+                2024,
+                "MIL",
+                30,
+                "Doubleheader, Pitcher",
+                False,
+                6,
+                1,
+                1,
+                1,
+                3,
+                1.0,
+            ),
         ],
     )
     create_pitcher_workload_view(con)
@@ -168,6 +341,44 @@ def test_same_day_appearances_are_aggregated_but_not_treated_as_history(
     assert june_10_row == (15, 2)
 
 
+def test_season_to_date_workload_excludes_current_appearance_and_crosses_teams(
+    workload_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    rows = workload_connection.sql(
+        """
+        SELECT
+            game_pk, is_start, season_appearance_number,
+            season_appearances_before, season_pitches_before,
+            season_outs_before, season_ip_before, season_ups_before
+        FROM pitcher_workload
+        WHERE pitcher_id = 10 AND season = 2024
+        ORDER BY game_date, game_pk
+        """
+    ).fetchall()
+
+    assert rows[0] == (101, False, 1, 0, 0, 0, 0.0, 0)
+    assert rows[2] == pytest.approx((103, True, 3, 2, 35, 7, 7 / 3, 3))
+    # The June 10 start contributes to workload before the June 11 relief outing.
+    assert rows[3] == (104, False, 4, 3, 45, 10, 10 / 3, 4)
+
+
+def test_season_to_date_workload_resets_between_seasons(
+    workload_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    row = workload_connection.sql(
+        """
+        SELECT
+            season_appearance_number, season_appearances_before,
+            season_pitches_before, season_outs_before,
+            season_ip_before, season_ups_before
+        FROM pitcher_workload
+        WHERE pitcher_id = 10 AND season = 2025
+        """
+    ).fetchone()
+
+    assert row == (1, 0, 0, 0, 0.0, 0)
+
+
 def test_supports_custom_source_and_output_view_names(
     workload_connection: duckdb.DuckDBPyConnection,
 ) -> None:
@@ -183,7 +394,7 @@ def test_supports_custom_source_and_output_view_names(
 
     assert workload_connection.sql(
         "SELECT count(*) FROM custom_workload"
-    ).fetchone() == (10,)
+    ).fetchone() == (12,)
 
 
 @pytest.mark.parametrize("parameter", ["view_name", "appearances_view_name"])

@@ -25,7 +25,10 @@ def create_pitcher_workload_view(
     Multiple appearances on one date are combined in the daily history. All
     appearances on that date receive the same workload from earlier dates;
     same-day games are not treated as previous-day work or ordered relative to
-    one another.
+    one another for acute windows. Season-to-date fields use deterministic
+    ``game_date, game_pk`` ordering within pitcher and season. ``game_pk`` is a
+    stable tie-breaker, but is not claimed to be first-pitch chronology for a
+    same-day doubleheader.
     """
 
     _validate_view_name(view_name, "view_name")
@@ -104,6 +107,40 @@ def create_pitcher_workload_view(
                     pitcher_dates RANGE BETWEEN INTERVAL 7 DAYS PRECEDING
                     AND INTERVAL 1 DAY PRECEDING
                 )
+        ),
+        cumulative_workload AS (
+            SELECT
+                source_appearance.*,
+                row_number() OVER season_appearances
+                    AS season_appearance_number,
+                row_number() OVER season_appearances - 1
+                    AS season_appearances_before,
+                coalesce(
+                    sum(pitch_count) OVER season_before,
+                    0
+                ) AS season_pitches_before,
+                coalesce(
+                    sum(outs_recorded) OVER season_before,
+                    0
+                ) AS season_outs_before,
+                coalesce(
+                    sum(outs_recorded) OVER season_before,
+                    0
+                ) / 3.0 AS season_ip_before,
+                coalesce(
+                    sum(ups) OVER season_before,
+                    0
+                ) AS season_ups_before
+            FROM {appearances_view_name} AS source_appearance
+            WINDOW
+                season_appearances AS (
+                    PARTITION BY pitcher_id, season
+                    ORDER BY game_date, game_pk
+                ),
+                season_before AS (
+                    season_appearances ROWS BETWEEN UNBOUNDED PRECEDING
+                    AND 1 PRECEDING
+                )
         )
         SELECT
             appearance.*,
@@ -137,7 +174,7 @@ def create_pitcher_workload_view(
             coalesce(workload.appearances_previous_day, 0) > 0
                 AND coalesce(workload.appearances_two_days_ago, 0) > 0
                 AS pitched_two_consecutive_days
-        FROM {appearances_view_name} AS appearance
+        FROM cumulative_workload AS appearance
         LEFT JOIN daily_workload AS workload
             ON appearance.pitcher_id = workload.pitcher_id
             AND appearance.game_date = workload.game_date

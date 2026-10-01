@@ -25,12 +25,28 @@ def statcast_connection(
             at_bat_number BIGINT,
             pitch_number BIGINT,
             pitcher BIGINT,
-            player_name VARCHAR
+            player_name VARCHAR,
+            events VARCHAR,
+            description VARCHAR,
+            pitch_type VARCHAR,
+            release_speed DOUBLE,
+            launch_speed DOUBLE,
+            launch_speed_angle BIGINT,
+            outs_when_up BIGINT,
+            post_home_score BIGINT,
+            post_away_score BIGINT
         )
         """
     )
     con.executemany(
-        "INSERT INTO synthetic_statcast VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        """
+        INSERT INTO synthetic_statcast (
+            game_pk, game_date, season, game_type, home_team, away_team,
+            inning, inning_topbot, at_bat_number, pitch_number,
+            pitcher, player_name
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
         [
             # Away batters: the home team pitches. Pitcher 101 starts, then 102.
             (
@@ -79,6 +95,78 @@ def statcast_connection(
             (
                 3, "2024-10-01", 2024, "P", "MIL", "CHC",
                 1, "Top", 1, 1, 301, "Postseason, Pitcher",
+            ),
+        ],
+    )
+    con.executemany(
+        """
+        INSERT INTO synthetic_statcast (
+            game_pk, game_date, season, game_type, home_team, away_team,
+            inning, inning_topbot, at_bat_number, pitch_number,
+            pitcher, player_name, events, description, pitch_type,
+            release_speed, launch_speed, launch_speed_angle
+        )
+        VALUES (
+            4, DATE '2024-06-03', 2024, 'R', 'MIL', 'CHC',
+            ?, 'Top', ?, ?, 401, 'Metrics, Pitcher', ?, ?, ?, ?, ?, ?
+        )
+        """,
+        [
+            # Strikeout: called strike, foul, swinging strike.
+            (7, 1, 1, None, "called_strike", "FF", 95.0, None, None),
+            (7, 1, 2, None, "foul", "SL", 86.0, None, None),
+            (7, 1, 3, "strikeout", "swinging_strike", "FF", 97.0, None, None),
+            # Four-pitch walk.
+            (7, 2, 1, None, "ball", "FF", 94.0, None, None),
+            (7, 2, 2, None, "ball", "CH", 87.0, None, None),
+            (7, 2, 3, None, "ball", "SL", 85.0, None, None),
+            (7, 2, 4, "walk", "ball", "CU", 80.0, None, None),
+            # Five balls in play; two lack tracking measurements.
+            (8, 3, 1, "home_run", "hit_into_play", "FF", 96.0, 100.0, 6),
+            (8, 4, 1, "double", "hit_into_play", "CH", 86.0, 94.9, 4),
+            (8, 5, 1, "field_out", "hit_into_play", "SI", 93.0, 95.0, 2),
+            (8, 6, 1, "field_out", "hit_into_play", "SI", 92.0, None, None),
+            (8, 7, 1, "field_out", "hit_into_play", "SI", 91.0, None, None),
+        ],
+    )
+    con.executemany(
+        """
+        INSERT INTO synthetic_statcast (
+            game_pk, game_date, season, game_type, home_team, away_team,
+            inning, inning_topbot, at_bat_number, pitch_number,
+            pitcher, player_name, events, description, pitch_type,
+            release_speed, outs_when_up
+        ) VALUES (
+            5, DATE '2024-06-04', 2024, 'R', 'MIL', 'CHC',
+            ?, ?, ?, ?, ?, ?, ?, ?, 'CH', 85.0, ?
+        )
+        """,
+        [
+            # A runner out between pitches changes outs_when_up without an event.
+            (7, "Top", 1, 1, 501, "Runner Outs, Pitcher", None, "ball", 0),
+            (7, "Top", 1, 2, 501, "Runner Outs, Pitcher", None, "ball", 1),
+            (
+                7,
+                "Top",
+                1,
+                3,
+                501,
+                "Runner Outs, Pitcher",
+                "double_play",
+                "hit_into_play",
+                1,
+            ),
+            # A later half-inning proves that the top half completed three outs.
+            (
+                7,
+                "Bot",
+                2,
+                1,
+                601,
+                "Other, Pitcher",
+                "field_out",
+                "hit_into_play",
+                2,
             ),
         ],
     )
@@ -132,6 +220,84 @@ def test_derives_both_pitching_teams_and_one_starter_each(
     assert rows == [("CHC", 1), ("MIL", 1)]
 
 
+def test_derives_appearance_results_and_pitch_process_metrics(
+    statcast_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    appearances.create_pitcher_appearances_view(statcast_connection)
+
+    row = statcast_connection.sql(
+        """
+        SELECT
+            pitch_count, innings_appeared, ups, outs_recorded, innings_pitched,
+            batters_faced, strikeouts, walks, hits, home_runs,
+            strikes, strike_rate, swings, whiffs, whiff_rate,
+            called_strikes, csw, csw_rate
+        FROM pitcher_appearances
+        WHERE game_pk = 4 AND pitcher_id = 401
+        """
+    ).fetchone()
+
+    assert row[:10] == (12, 2, 2, 4, 4 / 3, 7, 1, 1, 2, 1)
+    assert row[10:] == pytest.approx((8, 8 / 12, 7, 1, 1 / 7, 1, 2, 2 / 12))
+
+
+def test_derives_velocity_and_measured_contact_quality(
+    statcast_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    appearances.create_pitcher_appearances_view(statcast_connection)
+
+    row = statcast_connection.sql(
+        """
+        SELECT
+            fastball_pitches, avg_fastball_velocity, max_fastball_velocity,
+            balls_in_play, exit_velocity_balls,
+            avg_exit_velocity, max_exit_velocity,
+            hard_hit_count, hard_hit_rate,
+            barrel_eligible_balls, barrel_count, barrel_rate
+        FROM pitcher_appearances
+        WHERE game_pk = 4 AND pitcher_id = 401
+        """
+    ).fetchone()
+
+    assert row[:5] == (4, 95.5, 97.0, 5, 3)
+    assert row[5:] == pytest.approx(
+        ((100.0 + 94.9 + 95.0) / 3, 100.0, 2, 2 / 3, 3, 1, 1 / 3)
+    )
+
+
+def test_outs_include_non_terminal_runner_outs(
+    statcast_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    appearances.create_pitcher_appearances_view(statcast_connection)
+
+    assert statcast_connection.sql(
+        """
+        SELECT outs_recorded, innings_pitched
+        FROM pitcher_appearances
+        WHERE game_pk = 5 AND pitcher_id = 501
+        """
+    ).fetchone() == (3, 1.0)
+
+
+def test_zero_denominators_and_no_fastballs_return_null_rates_and_velocity(
+    statcast_connection: duckdb.DuckDBPyConnection,
+) -> None:
+    appearances.create_pitcher_appearances_view(statcast_connection)
+
+    row = statcast_connection.sql(
+        """
+        SELECT
+            fastball_pitches, avg_fastball_velocity, max_fastball_velocity,
+            swings, whiff_rate, exit_velocity_balls, hard_hit_rate,
+            barrel_eligible_balls, barrel_rate
+        FROM pitcher_appearances
+        WHERE game_pk = 1 AND pitcher_id = 102
+        """
+    ).fetchone()
+
+    assert row == (0, None, None, 0, None, 0, None, 0, None)
+
+
 def test_uses_game_team_and_pitcher_grain_and_preserves_pitcher_id(
     statcast_connection: duckdb.DuckDBPyConnection,
 ) -> None:
@@ -165,7 +331,7 @@ def test_includes_only_regular_season_by_default(
 
     assert statcast_connection.sql(
         "SELECT DISTINCT game_pk FROM pitcher_appearances ORDER BY game_pk"
-    ).fetchall() == [(1,), (2,)]
+    ).fetchall() == [(1,), (2,), (4,), (5,)]
 
 
 def test_can_select_another_game_type(
@@ -208,7 +374,11 @@ def test_rejects_unexpected_inning_half(
 ) -> None:
     statcast_connection.execute(
         """
-        INSERT INTO synthetic_statcast VALUES
+        INSERT INTO synthetic_statcast (
+            game_pk, game_date, season, game_type, home_team, away_team,
+            inning, inning_topbot, at_bat_number, pitch_number,
+            pitcher, player_name
+        ) VALUES
             (4, DATE '2024-06-03', 2024, 'R', 'MIL', 'CHC', 1, 'Middle',
              1, 1, 401, 'Unexpected, Pitcher')
         """
